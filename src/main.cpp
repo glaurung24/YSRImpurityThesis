@@ -13,6 +13,7 @@
 #include "TBTK/Timer.h"
 #include "TBTK/Index.h"
 #include <complex>
+#include <memory>
 #include "TBTK/Exporter.h"
 using namespace std;
 using namespace TBTK;
@@ -21,7 +22,7 @@ complex<double> i(0, 1);
 
 
 //Lattice size
-const unsigned int SIZE = 31;
+const unsigned int SIZE = 11;
 const unsigned int SIZE_X = SIZE;
 const unsigned int SIZE_Y = SIZE;
 const unsigned int SIZE_Z = SIZE;
@@ -46,7 +47,7 @@ const bool PERIODIC_BC_Y = true;
 const bool SELF_CONSISTENCY = false;
 const bool USE_GPU = true;
 const bool USE_MULTI_GPU = true;
-const unsigned int dimensions = 2;
+const unsigned int DIMENSIONS = 3;
 
 const int useOnlyOneBlock = 0; // Set to 1 for first block, 2 for second block, 0 to use both
 
@@ -74,6 +75,46 @@ int getBlockIndex(
     }
 }
 
+vector<Index> generateSpatialIndices()
+{
+    vector<Index> positionIndexList;
+    if (DIMENSIONS == 0)
+    {
+        return {};
+    }
+    unsigned num_indices = pow(SIZE, DIMENSIONS);
+    positionIndexList.resize(num_indices);
+    for (unsigned idx = 0; idx < num_indices; ++idx){
+        Index pos;
+        unsigned temp = idx;
+        for (unsigned dim = 1; dim < DIMENSIONS + 1; ++dim)
+        {
+            Subindex x = 0;
+            unsigned majorityNum = pow(SIZE, DIMENSIONS - dim);
+            while (temp >= majorityNum)
+            {
+                temp -= majorityNum;
+                ++x;
+            }
+            pos.pushBack({x});
+        }
+        positionIndexList.at(idx) =pos;
+    }
+    return positionIndexList;
+}
+
+Index spatialImpurityIndex()
+{
+    Index positionImp;
+    if (DIMENSIONS == 0)
+    {
+        return {};
+    }
+    for (unsigned idx = 0; idx < DIMENSIONS; ++idx){
+        positionImp.pushBack(SIZE/2);
+    }
+    return positionImp;
+}
 
 // double getParity(PropertyExtractor::Diagonalizer& pe, unsigned sizeX, unsigned sizeY){
 // 	double n_up = 0;
@@ -95,7 +136,7 @@ int getBlockIndex(
 // 	return n_up + n_down;
 // }
 
-bool selfConsistencyStep(Solver::Diagonalizer solver){
+bool selfConsistencyStep(Solver::Diagonalizer solver){ //TODO dimensions (only two atm)
 	PropertyExtractor::Diagonalizer property_extractor(solver);
 	Array<complex<double>> delta_old = Delta;
 	//Clear the order parameter of the next step
@@ -169,7 +210,7 @@ class DeltaCallback : public HoppingAmplitude::AmplitudeCallback{
 
 //Function responsible for initializing the order parameter
 void initDelta(){
-    if(dimensions == 3){
+    if(DIMENSIONS == 3){
         Delta = Array<complex<double>>({SIZE_X, SIZE_Y, SIZE_Z});
     }
     else{
@@ -214,65 +255,86 @@ private:
 Model generateModel(const complex<double> &mu, const complex<double> &delta, const complex<double> &U, const JCallback &jCallback){
     //Set up the Model.
     Model model;
-    for(unsigned int x = 0; x < SIZE_X; x++){
-        for(unsigned int y = 0; y < SIZE_Y; y++){
-            for(unsigned int spin = 0; spin < 2; spin++){
-                for(unsigned int ph = 0; ph < 2; ph++){
-                    int block = getBlockIndex({spin, ph});
-                    if(block >= 0){
+    vector<Index> spatialPositions = generateSpatialIndices();
+    for(auto onsite_pos : spatialPositions){
+        for(unsigned int spin = 0; spin < 2; spin++){
+            for(unsigned int ph = 0; ph < 2; ph++){
+                int block = getBlockIndex({spin, ph});
+                Index onsiteIndex({block, spin, ph});
+                for (unsigned index = 0; index < onsite_pos.getSize(); ++index)
+                {
+                    onsiteIndex.pushBack(onsite_pos.at(index));
+                }
+                if(block >= 0){
+                    model << HoppingAmplitude(
+                        -mu*(1. - 2*ph),
+                        {onsiteIndex},
+                        {onsiteIndex}
+                    );
+                    for (unsigned dim = 0; dim < DIMENSIONS; ++dim)
+                    {
+                        Index hoppingIndex({block, spin, ph});
+                        for (unsigned index = 0; index < onsite_pos.getSize(); ++index)
+                        {
+                            if (index == dim)
+                            { // Hopping for this dimension
+                                hoppingIndex.pushBack((onsite_pos.at(index) + 1) % SIZE);
+                            }
+                            else
+                            {
+                                hoppingIndex.pushBack(onsite_pos.at(index));
+                            }
+                        }
                         model << HoppingAmplitude(
-                            -mu*(1. - 2*ph),
-                            {block, spin, ph, x, y},
-                            {block, spin, ph, x, y}
-                        );
-                        if(x+1 < SIZE_X){
-                            model << HoppingAmplitude(
-                                t*(1. - 2*ph),
-                                {block, spin, ph, x+1, y},
-                                {block, spin, ph, x, y}
-                            ) + HC;
-                        }
-                        if(y+1 < SIZE_Y){
-                            model << HoppingAmplitude(
-                                t*(1. - 2*ph),
-                                {block, spin, ph, x, y+1},
-                                {block, spin, ph, x, y}
-                            ) + HC;
-                        }
+                                    -t * (1. - 2 * ph),
+                                    hoppingIndex,
+                                    onsiteIndex) +
+                                    HC;
                     }
                 }
-                int block_to = getBlockIndex({spin, 0});
-                int block_from = getBlockIndex({(spin+1)%2, 1});
-                if(block_to >= 0 and block_from >= 0){
-                    model << HoppingAmplitude(
-                        delta*(1. - 2*spin),
-                        {block_to, spin, 0, x, y},
-                        {block_from, (spin+1)%2, 1, x, y}
-                    ) + HC;
-                }
+            }
+            int block_to = getBlockIndex({spin, 0});
+            int block_from = getBlockIndex({(spin+1)%2, 1});
+            Index onsiteIndex_to({block_to, spin, 0});
+            Index onsiteIndex_from({block_from, (spin+1)%2, 1});
+            for (unsigned index = 0; index < onsite_pos.getSize(); ++index)
+            {
+                onsiteIndex_to.pushBack(onsite_pos.at(index));
+                onsiteIndex_from.pushBack(onsite_pos.at(index));
+            }
+            if(block_to >= 0 and block_from >= 0){
+                model << HoppingAmplitude(
+                    delta*(1. - 2*spin),
+                    onsiteIndex_to,
+                    onsiteIndex_from
+                ) + HC;
             }
         }
     }
+    Index impIndex = spatialImpurityIndex();
     for(unsigned int spin = 0; spin < 2; spin++){
         for(unsigned int ph = 0; ph < 2; ph++){
             int block = getBlockIndex({spin, ph});
+            Index onsiteIndex = {block, spin, ph};
+            for (unsigned index = 0; index < impIndex.getSize(); ++index){
+                onsiteIndex.pushBack(impIndex.at(index));
+            }
             if(block >= 0){
                 model << HoppingAmplitude(
                     jCallback,
-                    {block, spin, ph, SIZE_X/2, SIZE_Y/2},
-                    {block, spin, ph, SIZE_X/2, SIZE_Y/2}
+                    onsiteIndex,
+                    onsiteIndex
                 );
                 model << HoppingAmplitude(
                     U*(1. - 2*ph),
-                    {block, spin, ph, SIZE_X/2, SIZE_Y/2},
-                    {block, spin, ph, SIZE_X/2, SIZE_Y/2}
+                    onsiteIndex,
+                    onsiteIndex
                 );
             }
         }
     }
     model.construct();
     return model;
-
 }
 
 
@@ -313,8 +375,12 @@ void runDOScalcs(){
             resolution
         );
 
-        TBTK::Index idx_ldos = {IDX_SUM_ALL, IDX_SUM_ALL, 0, SIZE_X/2, SIZE_Y/2};
-        
+        Index impuritySite = spatialImpurityIndex();
+        TBTK::Index idx_ldos = {IDX_SUM_ALL, IDX_SUM_ALL, 0};
+        for (unsigned index = 0; index < impuritySite.getSize(); ++index){
+            idx_ldos.pushBack(impuritySite.at(index));
+        }
+    
         Property::LDOS ldos = pe.calculateLDOS(
             {idx_ldos}
         );
@@ -364,24 +430,56 @@ void runDOScalcs(){
     plotter.clear();
 }
 
-int main(){
-    //Initialize TBTK.
-    Initialize();
+vector<complex<double>> calculateExpectationValuesPerState(const unique_ptr<PropertyExtractor::BlockDiagonalizer>& pe, const Index& to, const Index& from,
+                                                            const vector<Subindex>& stateIndices){
+    int nr_states = stateIndices.size();
+    vector<complex<double>> values(nr_states, 0.);
+    vector<Index> to_patterns(nr_states, to);
+    vector<Index> from_patterns(nr_states, from);
+    Property::WaveFunctions wf_to = pe->calculateWaveFunctions(to_patterns, stateIndices);
+    Property::WaveFunctions wf_from = pe->calculateWaveFunctions(from_patterns, stateIndices);
+	for(Subindex n = 0; n < nr_states; n++){
+        complex<double> u_to = wf_to(to_patterns[n], n);
+        complex<double> u_from = wf_from(from_patterns[n], n);
 
-    runDOScalcs();
-    exit(0);
-    //Parameters.
-    // const unsigned int SIZE_X = SIZE_X;
-    // const unsigned int SIZE_Y = SIZE_Y;
-    // const double t = -1;
-    // const double mu = -2.;
-    // const double Delta = 0.5;
-    //Create a callback that returns the Zeeman term and that will be used
-    //as input to the Model.
+        values [n] += conj(u_to)*u_from;
+    }
+    return values;
+}
+
+vector<double> calculateMagnetizationPerState(const unique_ptr<PropertyExtractor::BlockDiagonalizer>& pe, const vector<Subindex>& stateIndices){
+    int nr_states = stateIndices.size();
+    vector<double> magnetizations(nr_states,0.);
+    for(unsigned int spin = 0; spin < 2; spin++){
+        double prefactor = 2*(0.5 - spin);
+        for(unsigned int ph = 0; ph < 2; ph++){
+            prefactor *= 2*(0.5 - ph);
+            Index pattern = {IDX_SUM_ALL};
+            pattern.pushBack(spin);
+            pattern.pushBack(ph);
+            for(unsigned dim = 0; dim < DIMENSIONS; dim++){
+                pattern.pushBack(IDX_SUM_ALL);
+            }
+            vector<complex<double>> weights = calculateExpectationValuesPerState(pe, pattern, pattern, stateIndices);
+            for(unsigned idx = 0; idx <  weights.size(); idx++){
+                magnetizations[idx] += prefactor*real(weights[idx]);
+                if(abs(imag(weights[idx])) > 1E-6 ){
+                    cerr << "error in calc at: " << __LINE__ << endl;
+                }
+            }
+        }
+    }
+    return magnetizations;
+}
+
+void energySpectrum(){
+
     JCallback jCallback;
     Model model = generateModel(mu, DELTA, U, jCallback);
+
+
     //Number of iterations.
-    const unsigned int NUM_ITERATIONS = 100;
+    const unsigned int NUM_ITERATIONS = 30;
     //Arrays where the results are stored after each iteration.
     Array<double> totalLdos({NUM_ITERATIONS, 500}, 0);
     Array<double> totalEigenValues({
@@ -403,28 +501,29 @@ int main(){
         //Update the callback with the current value of J.
         jCallback.setJ(j[n]);
         //Set up the Solver.
-        Solver::BlockDiagonalizer solver;
-        solver.setModel(model);
-        solver.setUseGPUAcceleration(USE_GPU);
-        solver.setUseMultiGPUAcceleration(USE_MULTI_GPU);
-        TBTK::Timer::tick();
-        solver.run();
-        TBTK::Timer::tock();
+        unique_ptr<Solver::BlockDiagonalizer> solver = solveModel(model);
         //Set up the PropertyExtractor.
-        PropertyExtractor::BlockDiagonalizer propertyExtractor(solver);
-        propertyExtractor.setEnergyWindow(
-            -10,
-            10,
-            10000000
-        );
+        PropertyExtractor::BlockDiagonalizer propertyExtractor(*solver);
+
 		std::cout << "J: " << j[n] << std::endl;
 		// getParity(propertyExtractor, SIZE_X, SIZE_Y) ;
         //Calculate the eigenvalues.
         Property::EigenValues eigenValues
             = propertyExtractor.getEigenValues();
+
+        const double LOWER_BOUND = -2*DELTA;
+        const double UPPER_BOUND = 2*DELTA;
+        vector<Subindex> energyIndices;
+        //Calculate Magnetization per eigenvalue within the bounds
+        for(int idx_ev = 0; idx_ev < eigenValues.getSize(); idx_ev++){
+            if(eigenValues(idx_ev) > LOWER_BOUND and eigenValues(idx_ev) < UPPER_BOUND){
+                energyIndices.push_back(idx_ev);
+            }
+        }
+        calculateMagnetizationPerState(make_unique<PropertyExtractor::BlockDiagonalizer>(propertyExtractor), energyIndices);
+
         //Calculate the local density of states (LDOS).
-        const double LOWER_BOUND = -5;
-        const double UPPER_BOUND = 5;
+
         const unsigned int RESOLUTION = 500;
         propertyExtractor.setEnergyWindow(
             LOWER_BOUND,
@@ -432,12 +531,11 @@ int main(){
             RESOLUTION
         );
         Property::LDOS ldos = propertyExtractor.calculateLDOS({
-            {IDX_SUM_ALL, IDX_SUM_ALL, IDX_SUM_ALL, SIZE_X/2, SIZE_Y/2},
-            {IDX_SUM_ALL, IDX_SUM_ALL, IDX_SUM_ALL, SIZE_X/4, SIZE_Y/4}
+            {IDX_SUM_ALL, IDX_SUM_ALL, IDX_SUM_ALL, SIZE_X/2, SIZE_Y/2}
         });
         //Smooth the LDOS.
-        const double SMOOTHING_SIGMA = 0.1;
-        const unsigned int SMOOTHING_WINDOW = 51;
+        const double SMOOTHING_SIGMA = 0.01;
+        const unsigned int SMOOTHING_WINDOW = 31;
         ldos = Smooth::gaussian(
             ldos,
             SMOOTHING_SIGMA,
@@ -490,4 +588,14 @@ int main(){
         );
     }
     plotter.save("EigenValues.png");
+
+}
+
+int main(){
+    //Initialize TBTK.
+    Initialize();
+
+    runDOScalcs();
+    energySpectrum();
+    return 0;
 }
