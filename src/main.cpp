@@ -24,7 +24,7 @@ complex<double> i(0, 1);
 
 
 //Lattice size
-const unsigned int SIZE = 21;
+const unsigned int SIZE = 61;
 const unsigned int SIZE_X = SIZE;
 const unsigned int SIZE_Y = SIZE;
 const unsigned int SIZE_Z = SIZE;
@@ -152,6 +152,7 @@ bool selfConsistencyStep(const unique_ptr<Solver::BlockDiagonalizer>& solver){ /
 
 
 	//Calculate new order parameter from gap equation for each site
+    #pragma omp parallel for
 	for(unsigned int x = 0; x < SIZE_X; x++){
 		for(unsigned int y = 0; y < SIZE_Y; y++){
 			for(unsigned spin = 0; spin < 2; ++spin){
@@ -424,6 +425,7 @@ void runDOScalcs(){
 
 
         Exporter exporter;
+        exporter.setNumberSiginificantDigits(8);
         exporter.save(ldos_export, DATA_DIR + "ldos_particle_atImp_U_" + to_string(U_list[idx]) + ".csv");
         exporter.save(energies, DATA_DIR + "ldos_particle_atImp_energies_U_" + to_string(U_list[idx]) + ".csv");
 
@@ -484,7 +486,7 @@ vector<double> calculateMagnetizationPerState(const unique_ptr<PropertyExtractor
     vector<Index> patterns_all(nr_states, pattern_all);
     Property::WaveFunctions wavefcts = pe->calculateWaveFunctions(patterns_all, stateIndices);
     vector<Index> spatialPositions = generateSpatialIndices();
-    #pragma omp for
+    #pragma omp parallel for
     for(auto onsite_pos : spatialPositions){
         for(unsigned int spin = 0; spin < 2; spin++){
             double prefactor = (1. - 2*spin);
@@ -513,7 +515,7 @@ vector<double> calculateMagnetizationPerState(const unique_ptr<PropertyExtractor
 double calculateTotalMagnetization(const unique_ptr<PropertyExtractor::BlockDiagonalizer>& pe){
     double magnetization_expectation_value = 0.;
     vector<Index> onsitePostions = generateSpatialIndices();
-    #pragma omp for
+    #pragma omp parallel for
     for(auto onsite_pos : onsitePostions){
         for(unsigned int spin = 0; spin < 2; spin++){
             for(unsigned int ph = 0; ph < 2; ph++){
@@ -596,6 +598,7 @@ void energySpectrum(){
 
     Array<double> j_values(j);
     Exporter exporter;
+    exporter.setNumberSiginificantDigits(8);
     exporter.save(j_values, DATA_DIR + "jvalues.csv");
 
     for(unsigned int n = 0; n < NUM_ITERATIONS; n++){
@@ -767,7 +770,7 @@ Array<double> calculateLocalizationYSR(const unique_ptr<PropertyExtractor::Block
     }
     Property::WaveFunctions wavefcts = pe->calculateWaveFunctions({pattern_all}, {YSRstate});
     vector<Index> spatialPositions = generateSpatialIndices();
-    #pragma omp for
+    #pragma omp parallel for
     for(unsigned x = SIZE_X/2-radius; x < SIZE/2+radius; x++){
         for(unsigned y = SIZE_Y/2-radius; y < SIZE/2+radius; y++){
             for(unsigned int spin = 0; spin < 2; spin++){
@@ -804,6 +807,8 @@ void localization(){
     unsigned radius = 10;
     vector<complex<double>> mu_list = {0.0, 2., 3.618};
     Exporter exporter;
+    exporter.setNumberSiginificantDigits(8);
+
     for(auto mu : mu_list){
         DeltaCallback deltaCallback;
         initDelta();
@@ -856,6 +861,8 @@ void selfConsistency(){
 
     Array<double> j_values(j);
     Exporter exporter;
+    exporter.setNumberSiginificantDigits(8);
+
     exporter.save(j_values, DATA_DIR + "jvalues_sc.csv");
 
     for(unsigned int n = 0; n < NUM_ITERATIONS; n++){
@@ -945,9 +952,9 @@ int main(){
     //Initialize TBTK.
     Initialize();
 
-    // runDOScalcs();
-    // energySpectrum();
-    // localization();
+    runDOScalcs();
+    energySpectrum();
+    localization();
     selfConsistency();
     return 0;
 }
