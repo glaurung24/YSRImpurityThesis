@@ -20,7 +20,7 @@ FILE(
 	src/*.cpp
 )
 
-SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++14 -Wall -O3")
+SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++14 -Wall -O3 -flto=auto -fopenmp")
 
 ADD_EXECUTABLE(${APPLICATION_NAME} ${SRC})
 
