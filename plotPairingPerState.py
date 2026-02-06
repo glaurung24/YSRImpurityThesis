@@ -41,7 +41,7 @@ norm : Normalize
     The normalization used (TwoSlopeNorm).
 """
 def colored_line(x, y, c, ax=None, cmap='seismic', linewidth=2.0,
-                 vmin=None, vmax=None, center=0.0, rasterized=False,
+                 vmin=None, vmax=None, center=0.0, rasterized=False, norm=None,
                  **line_kw):
 
     x = np.asarray(x, dtype=float)
@@ -68,7 +68,8 @@ def colored_line(x, y, c, ax=None, cmap='seismic', linewidth=2.0,
         vmin, vmax = -a, +a
 
     # Diverging normalization: center -> white
-    norm = TwoSlopeNorm(vmin=vmin, vcenter=center, vmax=vmax)
+    if(norm is None):
+        norm = TwoSlopeNorm(vmin=vmin, vcenter=center, vmax=vmax)
 
     # Create the colored line collection
     lc = LineCollection(
@@ -103,28 +104,54 @@ def findYSRIndex(eigenvalues):
     return idx_low, idx_high
 
 
-data_dir = "data_test/"
+data_dir = "data/"
 figure_dir = "figures/"
+# plotTargetFiles = "pairings_per_state_non_local_real_J_"
+lower_threshold_pairing = 1e-7
+delta = 0.3
+
+sc = True
+if sc:
+    j_file = "jvalues_sc.csv"
+    pairings_file = "pairings_per_state_sc_real_J_"
+    energies_file = "eigenvalues_sc_J_"
+    delta_dist = np.loadtxt(data_dir + "delta_sc_J_0.000000.csv")
+    delta = delta_dist[0]
+else:
+    j_file = "jvalues.csv"
+    pairings_file = "pairings_per_state_real_J_"
+    energies_file = "eigenvalues_J_"
 
 significant_digits = 6
 
-delta = 0.3
-
 xlim = [0,4.5]
-ylim = [-1.5, 1.5]
+ylim = [-1.3, 1.3]
 
-j_values = np.loadtxt(data_dir + "jvalues.csv")
+j_values = np.loadtxt(data_dir + j_file)
 j_vals_plot = []
 
 eigenvalues_plot = []
 pairings_plot = []
 nr_eigvals = 0
+
+YSR_energy = [[],[]]
+YSR_pairing= [[], []]
+
 for j in j_values:
     try:
-        eigenvalues = np.loadtxt(data_dir + "eigenvalues_J_{0:.6f}.csv".format(round(j,significant_digits)))
+        eigenvalues = np.loadtxt(data_dir + energies_file + "{0:.6f}.csv".format(round(j,significant_digits)))
         nr_eigvals = len(eigenvalues)
-        pairings_per_state = np.loadtxt(data_dir + "pairings_per_state_real_J_{0:.6f}.csv".format(round(j,significant_digits)))
+        pairings_per_state = np.loadtxt(data_dir + pairings_file + "{0:.6f}.csv".format(round(j,significant_digits)))
         eigenvalues, pairings_per_state = zip(*sorted(zip(eigenvalues, pairings_per_state )))
+        YSR_low, YSR_high = findYSRIndex(eigenvalues)
+        if(pairings_per_state[YSR_low] < 0.):
+            YSR_low, YSR_high = YSR_high, YSR_low
+        YSR_energy[0].append(eigenvalues[YSR_low])
+        YSR_energy[1].append(eigenvalues[YSR_high])
+        YSR_pairing[0].append(pairings_per_state[YSR_low])
+        YSR_pairing[1].append(pairings_per_state[YSR_high])
+        eigenvalues = np.delete(eigenvalues, [YSR_low, YSR_high])
+        pairings_per_state = np.delete(pairings_per_state, [YSR_low, YSR_high])
         eigenvalues_plot.append(eigenvalues)
         pairings_plot.append(pairings_per_state)
         j_vals_plot.append(j)
@@ -158,6 +185,7 @@ S = np.array(pairings_plot_trimmed)
 lam = np.array(j_vals_plot)
 E = np.array(eigenvalues_plot_trimmed)/delta
 a = np.nanmax(np.abs(S))
+YSR_energy = np.array(YSR_energy)/delta
 
 print(S.shape)
 print(lam.shape)
@@ -168,7 +196,7 @@ print(E.shape)
 
 
 from matplotlib.colors import SymLogNorm
-norm = SymLogNorm(linthresh=1e-40, vmin=-a, vmax=a, base=10)
+norm = SymLogNorm(linthresh=lower_threshold_pairing, vmin=-a, vmax=a, base=10)
 # # Use 'seismic' with ScalarMappable as above
 
 
@@ -178,7 +206,13 @@ cmap = 'seismic'
 for n in range(E.shape[0]):
     # Reuse the same norm so the color meaning is consistent
     lc, _ = colored_line(lam, E[n], S[n], ax=ax, cmap=cmap, linewidth=1.2,
-                         vmin=-a, vmax=+a)
+                         vmin=-a, vmax=+a, norm=norm)
+
+for n in range(len(YSR_energy)):
+    # Reuse the same norm so the color meaning is consistent
+    lc, _ = colored_line(lam, YSR_energy[n], YSR_pairing[n], ax=ax, cmap=cmap, linewidth=1.2,
+                         vmin=-a, vmax=+a, norm=norm)
+
 
 # One colorbar for all
 from matplotlib.cm import ScalarMappable
@@ -190,13 +224,14 @@ cbar.set_label('Pairing')
 ax.set_xlabel(r'$J$')
 ax.set_ylabel(r'$\epsilon\,/\,\Delta$')
 # ax.set_title('Energy Spectrum (multiple branches) with S(λ) as color')
-ax.grid(True, alpha=0.3)
+
 
 ax.set_xlim(xlim)
 ax.set_ylim(ylim)
 
 linewidth=0.5
-ax.axvline(x=0, color='k',linewidth=linewidth)
+ax.axhline(y=0, color='k',linewidth=linewidth)
+ax.grid(True, alpha=0.3)
 
 fig.tight_layout()
 fig.savefig(figure_dir + "pairing.png")
