@@ -18,7 +18,7 @@ def findYSRIndex(eigenvalues):
     return idx_low, idx_high
 
 
-data_dir = "data_test/"
+data_dir = "data/"
 figure_dir = "figures/"
 
 significant_digits = 6
@@ -26,7 +26,7 @@ significant_digits = 6
 delta = 0.3
 
 xlim = [0,4.5]
-ylim = [-1.5, 1.5]
+ylim = [-1.3, 1.3]
 
 j_values = np.loadtxt(data_dir + "jvalues.csv")
 j_vals_plot = []
@@ -41,7 +41,7 @@ for j in j_values:
         eigenvalues = np.loadtxt(data_dir + "eigenvalues_J_{0:.6f}.csv".format(round(j,significant_digits)))
         nr_eigvals = len(eigenvalues)
         magnetizations_per_state = np.loadtxt(data_dir + "magnetizations_per_state_J_{0:.6f}.csv".format(round(j,significant_digits)))
-        eigenvalues, magnetizations_per_state, pairings_per_state = zip(*sorted(zip(eigenvalues, magnetizations_per_state, pairings_per_state )))
+        eigenvalues, magnetizations_per_state = zip(*sorted(zip(eigenvalues, magnetizations_per_state )))
         YSR_low, YSR_high = findYSRIndex(eigenvalues)
         YSR_energy[0].append(eigenvalues[YSR_low])
         YSR_energy[1].append(eigenvalues[YSR_high])
@@ -64,11 +64,6 @@ fig.patch.set_alpha(0.0)
 eigenvalues_plot = np.array(eigenvalues_plot)
 
 
-for idx_ev in range(len(eigenvalues_plot[0,:])):
-    if(np.min(np.abs(eigenvalues_plot[:,idx_ev]))> ylim[1]*delta):
-        continue
-    ax.plot(j_vals_plot, eigenvalues_plot[:,idx_ev]/delta, color='k')
-
 ysr_energies_plot = [[], []]
 for idx, mags in enumerate(YSR_magnetization):
     for idx_vec, mag in enumerate(mags):
@@ -77,20 +72,51 @@ for idx, mags in enumerate(YSR_magnetization):
         else:
             ysr_energies_plot[idx].append(YSR_energy[1][idx_vec])
 
+
 ysr_energies_plot[0][0] = YSR_energy[0][0]
 ysr_energies_plot[1][0] = YSR_energy[1][0]
+
+
+# Label the two YSR states in the plot
+# Where to place the labels
+j_label_positions = [1.0, 1.0]
+label_texts = [r'$\left| \uparrow \right \rangle$', r'$\left| \downarrow \right \rangle$']
+
 
 colors = ['b', 'r']
 for idx, ysr in enumerate(ysr_energies_plot):
     ysr = np.array(ysr)
     ax.plot(j_vals_plot, ysr/delta, color=colors[idx])
+
+    y_label = np.interp(j_label_positions[idx], j_vals_plot, ysr/delta)
+    color = colors[idx]
+    # Plot label, offset slightly so it doesn’t overlap the line
+    offset = 0.15*np.sign(ysr[0])
+    ax.text(j_label_positions[idx], y_label + offset, label_texts[idx],
+            color=color,
+            fontsize=10,
+            ha='left', va='center',
+            clip_on=True)   # respects axis limits
+
+
+for idx_ev in range(len(eigenvalues_plot[0,:])):
+    if(np.min(np.abs(eigenvalues_plot[:,idx_ev]))> ylim[1]*delta):
+        continue
+    ax.plot(j_vals_plot, eigenvalues_plot[:,idx_ev]/delta, color='dimgray')
+
+
+
+
+
 ax.set_xlim(xlim)
 ax.set_ylim(ylim)
 
 ax.set_xlabel(r'$J$')
 ax.set_ylabel(r'$\epsilon\,/\,\Delta$')
 linewidth=0.5
-ax.axvline(x=0, color='k',linewidth=linewidth)
+ax.axhline(y=0, color='k',linewidth=linewidth)
+ax.grid(True, alpha=0.3)
+
 
 fig.tight_layout()
 fig.savefig(figure_dir + "eigenvalues.png")
