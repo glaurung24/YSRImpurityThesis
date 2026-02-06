@@ -41,7 +41,6 @@ for j in j_values:
         eigenvalues = np.loadtxt(data_dir + "eigenvalues_J_{0:.6f}.csv".format(round(j,significant_digits)))
         nr_eigvals = len(eigenvalues)
         magnetizations_per_state = np.loadtxt(data_dir + "magnetizations_per_state_J_{0:.6f}.csv".format(round(j,significant_digits)))
-        pairings_per_state = np.loadtxt(data_dir + "pairings_per_state_real_J_{0:.6f}.csv".format(round(j,significant_digits)))
         eigenvalues, magnetizations_per_state, pairings_per_state = zip(*sorted(zip(eigenvalues, magnetizations_per_state, pairings_per_state )))
         YSR_low, YSR_high = findYSRIndex(eigenvalues)
         YSR_energy[0].append(eigenvalues[YSR_low])
@@ -90,6 +89,8 @@ ax.set_ylim(ylim)
 
 ax.set_xlabel(r'$J$')
 ax.set_ylabel(r'$\epsilon\,/\,\Delta$')
+linewidth=0.5
+ax.axvline(x=0, color='k',linewidth=linewidth)
 
 fig.tight_layout()
 fig.savefig(figure_dir + "eigenvalues.png")
