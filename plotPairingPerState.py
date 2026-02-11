@@ -48,7 +48,7 @@ norm : Normalize
     The normalization used (TwoSlopeNorm).
 """
 def colored_line(x, y, c, ax=None, cmap='seismic', linewidth=2.0,
-                 vmin=None, vmax=None, center=0.0, rasterized=False, norm=None,
+                 vmin=None, vmax=None, center=0.0, rasterized=False, norm=None, zorder=None,
                  **line_kw):
 
     x = np.asarray(x, dtype=float)
@@ -85,6 +85,9 @@ def colored_line(x, y, c, ax=None, cmap='seismic', linewidth=2.0,
         norm=norm,
         linewidth=linewidth,
         rasterized=rasterized,
+        zorder=zorder,
+        joinstyle="round",
+        capstyle="round",
         **line_kw
     )
     lc.set_array(c_seg)
@@ -145,7 +148,7 @@ def compute_edges(x):
 data_dir = "data_ultrares/"
 figure_dir = "figures/"
 # plotTargetFiles = "pairings_per_state_non_local_real_J_"
-lower_threshold_pairing = 1e-7
+lower_threshold_pairing = 1e-5
 delta = 0.3
 
 sc = True
@@ -250,31 +253,7 @@ for idx_ev in range(len(eigenvalues_plot[0][:])):
 eigenvalues_plot_trimmed = np.array(eigenvalues_plot_trimmed)
 print(np.shape(eigenvalues_plot_trimmed))
 
-############### Calculate "ldos" of the pairngs #####################
-resolution = len(j_vals_plot)
-sigma = (ylim[1]-ylim[0])*delta/resolution/3
-energy_grid = np.linspace(delta*ylim[0], delta*ylim[1], resolution)
-print(sigma)
 
-eigenvalues_all = np.array(eigenvalues_all)
-pairings_all = np.array(pairings_all)
-eigenvalues_all_trimmed = []
-pairings_all_trimmed = []
-for idx_ev in range(len(eigenvalues_all[0][:])):
-    if(np.min(np.abs(eigenvalues_all[:,idx_ev])) > ylim[1]*delta*1.1):
-        continue
-    eigenvalues_all_trimmed.append(eigenvalues_all[:,idx_ev])
-    pairings_all_trimmed.append(pairings_all[:,idx_ev])
-
-eigenvalues_all_trimmed = np.array(eigenvalues_all_trimmed)
-pairings_all_trimmed = np.array(pairings_all_trimmed)
-ldos_pairing = []
-
-for idx in range(len(eigenvalues_all_trimmed[:][0])):
-    ldos = compute_ldos(eigenvalues_all_trimmed[:,idx], pairings_all_trimmed[:,idx], energy_grid, sigma)
-    ldos_pairing.append(ldos)
-
-ldos_pairing = np.array(ldos_pairing)
 
 # Suppose shapes: lam: (N,), E: (M, N), S: (M, N)
 # Compute a global symmetric range
@@ -298,80 +277,126 @@ norm = SymLogNorm(linthresh=lower_threshold_pairing, vmin=-a, vmax=a, base=10)
 
 cmap = 'seismic'
 alpha=0.85
+linewidth_non_ysr=0.35
+linewidth_ysr = 1.0
+zorder_lines = -10
 for n in range(E.shape[0]):
     # Reuse the same norm so the color meaning is consistent
-    lc, _ = colored_line(lam, E[n], S[n], ax=ax, cmap=cmap, linewidth=linewidth,
-                         vmin=-a, vmax=+a, norm=norm)
+    lc, _ = colored_line(lam, E[n], S[n], ax=ax, cmap=cmap, linewidth=linewidth_non_ysr,
+                         vmin=-a, vmax=+a, norm=norm, zorder=zorder_lines)
     # lc, _ = colored_line(lam, E[n], S[n], ax=ax_bottom, cmap=cmap, linewidth=linewidth,
     #                      vmin=-a, vmax=+a, norm=norm, alpha=alpha)
 
 for n in range(len(YSR_energy)):
     # Reuse the same norm so the color meaning is consistent
-    lc, _ = colored_line(lam, YSR_energy[n], YSR_pairing[n], ax=ax, cmap=cmap, linewidth=linewidth,
-                         vmin=-a, vmax=+a, norm=norm)
+    lc, _ = colored_line(lam, YSR_energy[n], YSR_pairing[n], ax=ax, cmap=cmap, linewidth=linewidth_ysr,
+                         vmin=-a, vmax=+a, norm=norm, zorder=zorder_lines)
     # lc, _ = colored_line(lam, YSR_energy[n], YSR_pairing[n], ax=ax_bottom, cmap=cmap, linewidth=linewidth,
     #                      vmin=-a, vmax=+a, norm=norm)
 
-from matplotlib.colors import SymLogNorm
-a = np.max(ldos_pairing)
-norm_bottom = SymLogNorm(linthresh=1e-3, vmin=-a, vmax=a, base=10)
-fig_test, ax_test = plt.subplots(1,1)
-ax_test.plot(energy_grid, ldos_pairing[0,:])
-ax_test.plot(energy_grid, ldos_pairing[20,:])
-fig_test.savefig(figure_dir + "test.png")
+ax.set_rasterization_zorder(zorder_lines+1)
+
+
 
 # ax_bottom.grid(True, alpha=0.3)
 
 
 shading = 'auto' # 'auto' 'flat'
+plotPairingSmoothed = False
 
-if(shading == 'gouraud'):
-    ax_bottom.pcolormesh(j_vals_plot,energy_grid/delta, np.transpose(ldos_pairing), 
-                    #   extent=[ylim[0], ylim[1],
-                    #           j_vals_plot.min(), j_vals_plot.max()],
-                    #   aspect='auto', origin='lower', 
-                    shading=shading,
-                    # shading='gouraud',
-                    # shading='flat',
-                    norm=norm_bottom,
-                    cmap=cmap,
-                    rasterized=True
-                    )
+cbar_label_bottom = r'$\delta_{\nu, \mathbf{x}_0}$'
+from matplotlib.cm import ScalarMappable
+if(plotPairingSmoothed):
+    ############### Calculate "ldos" of the pairngs #####################
+
+    from matplotlib.colors import SymLogNorm
+    a = np.max(ldos_pairing)
+    norm_bottom = SymLogNorm(linthresh=1e-3, vmin=-a, vmax=a, base=10)
+    fig_test, ax_test = plt.subplots(1,1)
+    ax_test.plot(energy_grid, ldos_pairing[0,:])
+    ax_test.plot(energy_grid, ldos_pairing[20,:])
+    fig_test.savefig(figure_dir + "test.png")
+
+    resolution = len(j_vals_plot)
+    sigma = (ylim[1]-ylim[0])*delta/resolution/3
+    energy_grid = np.linspace(delta*ylim[0], delta*ylim[1], resolution)
+    print(sigma)
+
+    eigenvalues_all = np.array(eigenvalues_all)
+    pairings_all = np.array(pairings_all)
+    eigenvalues_all_trimmed = []
+    pairings_all_trimmed = []
+    for idx_ev in range(len(eigenvalues_all[0][:])):
+        if(np.min(np.abs(eigenvalues_all[:,idx_ev])) > ylim[1]*delta*1.1):
+            continue
+        eigenvalues_all_trimmed.append(eigenvalues_all[:,idx_ev])
+        pairings_all_trimmed.append(pairings_all[:,idx_ev])
+
+    eigenvalues_all_trimmed = np.array(eigenvalues_all_trimmed)
+    pairings_all_trimmed = np.array(pairings_all_trimmed)
+    ldos_pairing = []
+
+    for idx in range(len(eigenvalues_all_trimmed[:][0])):
+        ldos = compute_ldos(eigenvalues_all_trimmed[:,idx], pairings_all_trimmed[:,idx], energy_grid, sigma)
+        ldos_pairing.append(ldos)
+
+    ldos_pairing = np.array(ldos_pairing)
+    if(shading == 'gouraud'):
+        ax_bottom.pcolormesh(j_vals_plot,energy_grid/delta, np.transpose(ldos_pairing), 
+                        #   extent=[ylim[0], ylim[1],
+                        #           j_vals_plot.min(), j_vals_plot.max()],
+                        #   aspect='auto', origin='lower', 
+                        shading=shading,
+                        # shading='gouraud',
+                        # shading='flat',
+                        norm=norm_bottom,
+                        cmap=cmap,
+                        rasterized=True
+                        )
+    else:
+        ax_bottom.pcolormesh(compute_edges(j_vals_plot),compute_edges(energy_grid/delta), np.transpose(ldos_pairing), 
+                        #   extent=[ylim[0], ylim[1],
+                        #           j_vals_plot.min(), j_vals_plot.max()],
+                        #   aspect='auto', origin='lower', 
+                        shading=shading,
+                        # shading='gouraud',
+                        # shading='flat',
+                        norm=norm_bottom,
+                        cmap=cmap,
+                        rasterized=True
+                        )
+    sm_bottom = ScalarMappable(norm=norm_bottom, cmap=cmap)
+    sm_bottom.set_array([])
+    cbar = fig.colorbar(sm_bottom, ax=ax, pad=0.02)
+    cbar_bottom = fig.colorbar(sm_bottom, ax=ax_bottom, pad=0.02)
+    cbar_bottom.set_label(cbar_label_bottom)
 else:
-    ax_bottom.pcolormesh(compute_edges(j_vals_plot),compute_edges(energy_grid/delta), np.transpose(ldos_pairing), 
-                    #   extent=[ylim[0], ylim[1],
-                    #           j_vals_plot.min(), j_vals_plot.max()],
-                    #   aspect='auto', origin='lower', 
-                    shading=shading,
-                    # shading='gouraud',
-                    # shading='flat',
-                    norm=norm_bottom,
-                    cmap=cmap,
-                    rasterized=True
-                    )
+    for n in range(E.shape[0]):
+    # Reuse the same norm so the color meaning is consistent
+        lc, _ = colored_line(lam, E[n], S[n], ax=ax_bottom, cmap=cmap, linewidth=linewidth_non_ysr,
+                            vmin=-a, vmax=+a, norm=norm, zorder=zorder_lines)
+
+    for n in range(len(YSR_energy)):
+        # Reuse the same norm so the color meaning is consistent
+        lc, _ = colored_line(lam, YSR_energy[n], YSR_pairing[n], ax=ax_bottom, cmap=cmap, linewidth=linewidth_ysr,
+                            vmin=-a, vmax=+a, norm=norm, zorder=zorder_lines)
+
+    ax_bottom.set_rasterization_zorder(zorder_lines+1)
+    sm_bottom = ScalarMappable(norm=norm, cmap=cmap)
+    sm_bottom.set_array([])
+    cbar = fig.colorbar(sm_bottom, ax=ax, pad=0.02)
+    cbar_bottom = fig.colorbar(sm_bottom, ax=ax_bottom, pad=0.02)
+    cbar_bottom.set_label(cbar_label_bottom)
+
 
 
 
 # One colorbar for all
-from matplotlib.cm import ScalarMappable
 sm = ScalarMappable(norm=norm, cmap=cmap)
 sm.set_array([])
 cbar = fig.colorbar(sm, ax=ax, pad=0.02)
 cbar.set_label(r'$u^{(n)}_\uparrow v^{*(n)}_\downarrow$')
 
-
-# --- Attach colorbar WITHOUT changing layout ---
-# from mpl_toolkits.axes_grid1 import make_axes_locatable
-# divider_top = make_axes_locatable(ax_top)
-# cax_top = divider_top.append_axes("right", size="3%", pad=0.15)
-
-# divider = make_axes_locatable(ax_bottom)
-# cax = divider.append_axes("right", size="3%", pad=0.15)
-sm_bottom = ScalarMappable(norm=norm_bottom, cmap=cmap)
-sm_bottom.set_array([])
-cbar = fig.colorbar(sm_bottom, ax=ax, pad=0.02)
-cbar_bottom = fig.colorbar(sm_bottom, ax=ax_bottom, pad=0.02)
-cbar_bottom.set_label(r'$f_n$')
 
 
 # # ---- Control ticks: show every second major tick and no minor ticks ----
@@ -385,7 +410,7 @@ if len(ticks) > 0:
 
 
 ax.set_xlabel(r'$J$')
-ax.set_ylabel(r'$\epsilon\,/\,\Delta$')
+ax.set_ylabel(r'$E\,/\,\Delta$')
 ax_top.set_ylabel(r'$\Delta( \mathbf{x}_0)\,/\,\Delta$')
 ax_bottom.set_xlabel(r'$J$')
 ax_bottom.set_ylabel(r'$\epsilon\,/\,\Delta$')
