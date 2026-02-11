@@ -15,6 +15,142 @@ from matplotlib.cm import ScalarMappable
 #     'font.serif': ['STIXGeneral', 'Nimbus Roman', 'Nimbus Roman No9 L', 'Times', 'DejaVu Serif'],
 #     'mathtext.fontset': 'stix',  # matches Times aesthetics for math
 # })
+def align_ylabels(ax_list, x=-0.12, pad=10, use_constrained=True):
+    """Align y-labels across axes and optionally use constrained_layout."""
+    fig = ax_list[0].figure
+    if use_constrained:
+        # Only effective if subplots were created with constrained_layout=True
+        fig.align_ylabels(ax_list)
+    # Force identical label coords and padding (works regardless of layout engine)
+    for ax in ax_list:
+        ax.set_ylabel(ax.get_ylabel(), labelpad=pad)
+        ax.yaxis.set_label_coords(x, 0.5, transform=ax.transAxes)
+
+
+def mark_zero_crossings(ax, x, y, *,
+                        color='k',
+                        linestyle='--',
+                        linewidth=1.2,
+                        span='down',
+                        show_points=True,
+                        annotate_values=False,
+                        # --- New tick/label controls ---
+                        add_tick=True,
+                        tick_height_frac=0.02,
+                        tick_linewidth=1.5,
+                        tick_color=None,
+                        label_text=r'$J_C$',
+                        label_offset_pts=10,
+                        label_color=None,
+                        label_fontsize=None):
+    """
+    Mark zero crossings of y(x) with vertical dashed lines, a tick at the x-axis, and a custom label.
+
+    Parameters
+    ----------
+    ax : matplotlib.axes.Axes
+        The axes to draw on.
+    x, y : array_like
+        Sampled data for the curve (same length).
+    color : str
+        Color for the vertical guides (and points if enabled).
+    linestyle : str
+        Line style for the vertical guides.
+    linewidth : float
+        Line width for the vertical guides.
+    span : {'down', 'up', 'full', 'notch'}
+        'down' : draw from y_min (or 0 if y_min>0) up to 0
+        'up'   : draw from 0 up to y_max (or 0 if y_max<0)
+        'full' : draw from y_min to y_max
+        'notch': draw a short vertical mark centered at 0 (no tall guide)
+    show_points : bool
+        If True, put a dot at (x0, 0).
+    annotate_values : bool
+        If True, annotate each crossing with its numerical x0 value.
+    add_tick : bool
+        If True, draw a short tick crossing the axis at y=0.
+    tick_height_frac : float
+        Height of the tick as a fraction of current y-range (e.g., 0.02 = 2%).
+        The tick is drawn from y=0 downwards by this amount.
+    tick_linewidth : float
+        Line width of the tick.
+    tick_color : str or None
+        Color of the tick; defaults to `color` if None.
+    label_text : str
+        The special string to place under the tick, e.g., r'$J_C$'.
+        If empty or None, no label is drawn.
+    label_offset_pts : float
+        Vertical offset (in points) below the axis for the label text.
+    label_color : str or None
+        Color for the label text; defaults to `tick_color` or `color`.
+    label_fontsize : float or None
+        Font size for the label text.
+    """
+    x = np.asarray(x)
+    y = np.asarray(y)
+    if x.shape != y.shape:
+        raise ValueError("x and y must have the same shape.")
+    if x.ndim != 1:
+        raise ValueError("x and y must be 1-D arrays.")
+
+    # --- Find zero crossings by linear interpolation between consecutive points
+    sign_change = y[:-1] * y[1:] < 0
+    idx = np.where(sign_change)[0]
+    x0 = x[idx] - y[idx] * (x[idx+1] - x[idx]) / (y[idx+1] - y[idx])
+
+    if x0.size == 0:
+        return x0
+
+    # Current limits after the main curve is plotted
+    ymin, ymax = ax.get_ylim()
+    yr = ymax - ymin if ymax > ymin else 1.0
+
+    # --- Draw vertical guides ---
+    if span == 'down':
+        y1 = np.minimum(0, ymin)
+        y2 = 0.0
+        ax.vlines(x0, y1, y2, colors=color, linestyles=linestyle, linewidth=linewidth)
+    elif span == 'up':
+        y1 = 0.0
+        y2 = np.maximum(0, ymax)
+        ax.vlines(x0, y1, y2, colors=color, linestyles=linestyle, linewidth=linewidth)
+    elif span == 'full':
+        ax.vlines(x0, ymin, ymax, colors=color, linestyles=linestyle, linewidth=linewidth)
+    elif span == 'notch':
+        # handled in tick block below
+        pass
+    else:
+        raise ValueError("span must be one of {'down','up','full','notch'}")
+
+    # --- Optional point markers at (x0, 0) ---
+    if show_points:
+        ax.scatter(x0, np.zeros_like(x0), color=color, zorder=3)
+
+    # --- Add tick on the x-axis at y=0 and custom label ---
+    if add_tick or (label_text not in (None, "")):
+        tcol = tick_color or color
+        lcol = label_color or tcol or color
+        tick_h = tick_height_frac * yr
+
+        if add_tick:
+            # Draw a short vertical segment that crosses y=0 (downward notch)
+            ax.vlines(x0, 0.0, -tick_h, colors=tcol, linewidth=tick_linewidth)
+
+        if label_text not in (None, ""):
+            # Place label below the axis at y=0 (using offset in points)
+            for xi in np.atleast_1d(x0):
+                ax.annotate(label_text, xy=(xi, 0.0), xycoords='data',
+                            xytext=(0, -label_offset_pts), textcoords='offset points',
+                            ha='center', va='top', color=lcol, fontsize=label_fontsize)
+
+    # --- Optional numeric annotations near the point ---
+    if annotate_values:
+        for xi in x0:
+            ax.annotate(f'{xi:.3g}', xy=(xi, 0.0), xytext=(0, -1.8*label_offset_pts),
+                        textcoords='offset points', ha='center', va='top',
+                        color=color)
+
+    return x0
 
 """
 Plot a 2D line (x,y) whose color varies with c, using a diverging colormap.
@@ -238,6 +374,9 @@ linewidth = 1.5
 delta_plot = np.array(delta_plot)
 ax_top.plot(j_vals_plot, delta_plot/delta, linewidth=linewidth)
 
+qpt = mark_zero_crossings(ax_top, j_vals_plot, delta_plot, linewidth=0.75, linestyle="-", span='notch', show_points=False, annotate_values=False, add_tick=False, label_text='')
+
+
 
 eigenvalues_plot = np.array(eigenvalues_plot)
 pairings_plot = np.array(pairings_plot)
@@ -434,6 +573,27 @@ ax.axhline(y=0, color='k',linewidth=linewidth)
 ax.grid(True, alpha=0.3)
 ax_bottom.axhline(y=0, color='k',linewidth=linewidth)
 ax_top.axhline(y=0, color='k',linewidth=linewidth)
+
+linewidth_jc = 0.5
+ax_top.axvline(x=qpt, linewidth=linewidth_jc, color='k')
+ax_bottom.axvline(x=qpt, linewidth=linewidth_jc, color='k')
+
+
+ticks = list(ax_bottom.get_xticks())
+labels = [str(lbl) for lbl in ticks]
+
+# Add your custom tick
+ticks.append(qpt[0])                    # numeric x‑coordinate for the tick
+labels.append(r'$J_C$')            # the string label
+
+print(ticks)
+print(labels)
+
+ax_bottom.set_xticks(ticks, labels=labels)
+
+
+align_ylabels([ax_top, ax_bottom], use_constrained=False)
+
 # ax_top.grid(True, alpha=0.3)
 
 # fig2.tight_layout()
@@ -445,11 +605,3 @@ fig.tight_layout()
 fig.savefig(figure_dir + "pairing.pdf", dpi=300, bbox_inches="tight")   # vector
 fig.savefig(figure_dir + "pairing.pgf", dpi=300, bbox_inches="tight")   # vector
 fig.savefig(figure_dir + "pairing.png", dpi=300, bbox_inches="tight")  # raster
-
-
-# import matplot2tikz
-# matplot2tikz.Flavors.latex.preamble()
-# matplot2tikz.clean_figure()
-# matplot2tikz.save(figure_dir + "pairing.tex")
-# matplot2tikz.clean_figure(figure=fig_bottom)
-# matplot2tikz.save("figures/Thesis/anomalous_greens_compare_bottom.tex", figure=fig_bottom)
