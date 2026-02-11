@@ -24,10 +24,12 @@ complex<double> i(0, 1);
 
 
 //Lattice size
-const unsigned int SIZE = 61;
+const unsigned int SIZE = 71;
 const unsigned int SIZE_X = SIZE;
 const unsigned int SIZE_Y = SIZE;
 const unsigned int SIZE_Z = SIZE;
+
+const unsigned int J_ITERATIONS = 150; //70;
 
 //Order parameter. 
 Array<complex<double>> Delta;
@@ -56,8 +58,8 @@ const int useOnlyOneBlock = 0; // Set to 1 for first block, 2 for second block, 
 
 // Calculation details
 
-const string DATA_DIR = "../../../../data/";
-const string FIG_DIR = "../../../../figures/";
+const string DATA_DIR = "../../../../data_ultrares/"; //"../../../../data_highres/";
+const string FIG_DIR = "../../../../figures2/";
 
 // This function is supposed to divide the Hamiltonian into two blocks with the first block being particle spin up and hole spin down.
 // The second block is the other combination 
@@ -379,7 +381,7 @@ unique_ptr<Solver::BlockDiagonalizer> solveModel(Model &model){
 void runDOScalcs(){
     //as input to the Model.
     JCallback jCallback;
-    vector<double> U_list = {0.0, 0.5, -0.5};
+    vector<double> U_list = {0.0, 0.75, -0.75};
     vector<double> J_list = {1.0, 1.0, 1.0};
 
     Plotter plotter;
@@ -393,11 +395,11 @@ void runDOScalcs(){
         unique_ptr<Solver::BlockDiagonalizer> solver = solveModel(model);
 
         //Set up the PropertyExtractor.
-        unsigned resolution = 500;
+        unsigned resolution = 300;
         PropertyExtractor::BlockDiagonalizer pe(*solver);
         pe.setEnergyWindow(
-            -2*DELTA,
-            2*DELTA,
+            -1.5*DELTA,
+            1.5*DELTA,
             resolution
         );
 
@@ -410,7 +412,7 @@ void runDOScalcs(){
         Property::LDOS ldos = pe.calculateLDOS(
             {idx_ldos}
         );
-    
+        Property::DOS dos = pe.calculateDOS();
 
         Array<double> ldos_export({resolution},0);
         Array<double> energies({resolution},0);
@@ -428,6 +430,7 @@ void runDOScalcs(){
         exporter.setNumberSiginificantDigits(8);
         exporter.save(ldos_export, DATA_DIR + "ldos_particle_atImp_U_" + to_string(U_list[idx]) + ".csv");
         exporter.save(energies, DATA_DIR + "ldos_particle_atImp_energies_U_" + to_string(U_list[idx]) + ".csv");
+        exporter.save(dos, DATA_DIR + "dos_U_" + to_string(U_list[idx]) + ".csv");
 
         //Smooth the LDOS.
         const double SMOOTHING_SIGMA = 0.01;
@@ -502,7 +505,7 @@ vector<double> calculateMagnetizationPerState(const unique_ptr<PropertyExtractor
                     }
                     for(unsigned idx = 0; idx <  stateIndices.size(); idx++){
                         complex<double> wf = wavefcts(pattern, stateIndices[idx]);
-                        magnetizations[idx] += prefactor*real(conj(wf)*wf);
+                        magnetizations[idx] += 0.25*prefactor*real(conj(wf)*wf);
                     }
                 }
 
@@ -515,7 +518,7 @@ vector<double> calculateMagnetizationPerState(const unique_ptr<PropertyExtractor
 double calculateTotalMagnetization(const unique_ptr<PropertyExtractor::BlockDiagonalizer>& pe){
     double magnetization_expectation_value = 0.;
     vector<Index> onsitePostions = generateSpatialIndices();
-    #pragma omp parallel for
+    // #pragma omp parallel for
     for(auto onsite_pos : onsitePostions){
         for(unsigned int spin = 0; spin < 2; spin++){
             for(unsigned int ph = 0; ph < 2; ph++){
@@ -528,13 +531,53 @@ double calculateTotalMagnetization(const unique_ptr<PropertyExtractor::BlockDiag
                     {
                         onsiteIndex.pushBack(onsite_pos.at(index));
                     }
-                    magnetization_expectation_value += (1. - 2*spin)*(1. - 2*ph)*
+                    magnetization_expectation_value += 0.5*(1. - 2*spin)*(1. - 2*ph)*
                                                  real(pe->calculateExpectationValue(onsiteIndex, onsiteIndex));
                 }
             }
         }
     }
     return 0.5*magnetization_expectation_value;
+}
+
+vector<complex<double>> calculatePairingPerState(const unique_ptr<PropertyExtractor::BlockDiagonalizer>& pe, const vector<Subindex>& stateIndices){
+    int nr_states = stateIndices.size();
+    vector<complex<double>> pairings(nr_states,0.);
+    Index pattern_all = {IDX_ALL, IDX_ALL, IDX_ALL};
+    for(unsigned i = 0; i < DIMENSIONS; i++){
+        pattern_all.pushBack(IDX_ALL);
+    }
+    vector<Index> patterns_all(nr_states, pattern_all);
+    Property::WaveFunctions wavefcts = pe->calculateWaveFunctions(patterns_all, stateIndices);
+    // vector<Index> spatialPositions = generateSpatialIndices();
+    // for(auto onsite_pos : spatialPositions){
+    vector<Index> onsitePostions = generateSpatialIndices();
+    #pragma omp parallel for
+    for(auto onsite_pos : onsitePostions){
+        for(unsigned spin = 0; spin < 2; ++spin){
+            // Gap equation
+            int block_to = getBlockIndex({spin, 0});
+            int block_from = getBlockIndex({(spin+1)%2, 1});
+            double prefactor = 0.5;
+            if(useOnlyOneBlock != 0){
+                prefactor = 1.0;
+            }
+            Index pattern_from = {block_from, (spin+1)%2, 1};
+            Index pattern_to = {block_to, spin, 0};
+            for(unsigned dim = 0; dim < DIMENSIONS; dim++){
+                pattern_from.pushBack(onsite_pos.at(dim));
+                pattern_to.pushBack(onsite_pos.at(dim));
+            }
+            if(block_to >= 0 and block_from >= 0){
+                for(unsigned idx = 0; idx <  stateIndices.size(); idx++){
+                    complex<double> wf_from = wavefcts(pattern_from, stateIndices[idx]);
+                    complex<double> wf_to = wavefcts(pattern_to, stateIndices[idx]);
+                    pairings[idx] += prefactor *(-1.+2*spin) * conj(wf_from)*wf_to;
+                }
+            }
+        }
+    }
+    return pairings;
 }
 
 vector<complex<double>> calculatePairingPerStateAtImpSite(const unique_ptr<PropertyExtractor::BlockDiagonalizer>& pe, const vector<Subindex>& stateIndices){
@@ -584,8 +627,8 @@ void energySpectrum(){
     Model model = generateModel(mu, DELTA, U, jCallback, deltaCallback);
 
 
-    //Number of iterations.
-    const unsigned int NUM_ITERATIONS = 50;
+    //Number of iterations
+    const unsigned int NUM_ITERATIONS = J_ITERATIONS;
     //Arrays where the results are stored after each iteration.
     Array<double> totalLdos({NUM_ITERATIONS, 500}, 0);
     Array<double> totalLdosSmooth({NUM_ITERATIONS, 500}, 0);
@@ -633,25 +676,28 @@ void energySpectrum(){
                 totalMag += magnetizations[idx];
             }
         }
-        cout << totalMag << endl;
 
-        // cout << "Total Magnetization: " << calculateTotalMagnetization(make_unique<PropertyExtractor::BlockDiagonalizer>(propertyExtractor)) << endl;
+        cout << "Total Magnetization: " << calculateTotalMagnetization(make_unique<PropertyExtractor::BlockDiagonalizer>(propertyExtractor)) << endl;
 
         exporter.save(Array<double>(magnetizations), DATA_DIR + "magnetizations_per_state_J_" + to_string(j[n]) + ".csv");
         exporter.save(eigenValues, DATA_DIR + "eigenvalues_J_" + to_string(j[n]) + ".csv");
 
-        vector<complex<double>> pairings = calculatePairingPerStateAtImpSite(make_unique<PropertyExtractor::BlockDiagonalizer>(propertyExtractor), energyIndices);
-        exporter.save(Math::ArrayAlgorithms<complex<double>>::real(Array<complex<double>>(pairings)), DATA_DIR + "pairings_per_state_real_J_" + to_string(j[n]) + ".csv");
-        exporter.save(Math::ArrayAlgorithms<complex<double>>::imag(Array<complex<double>>(pairings)), DATA_DIR + "pairings_per_state_imag_J_" + to_string(j[n]) + ".csv");
+        // vector<complex<double>> pairings = calculatePairingPerStateAtImpSite(make_unique<PropertyExtractor::BlockDiagonalizer>(propertyExtractor), energyIndices);
+        // exporter.save(Math::ArrayAlgorithms<complex<double>>::real(Array<complex<double>>(pairings)), DATA_DIR + "pairings_per_state_real_J_" + to_string(j[n]) + ".csv");
+        // exporter.save(Math::ArrayAlgorithms<complex<double>>::imag(Array<complex<double>>(pairings)), DATA_DIR + "pairings_per_state_imag_J_" + to_string(j[n]) + ".csv");
 
-        double deltaAtImp = 0.;
-        for(unsigned idx = 0; idx < eigenValues.getSize(); idx++){
+        // vector<complex<double>> pairings_non_local = calculatePairingPerState(make_unique<PropertyExtractor::BlockDiagonalizer>(propertyExtractor), energyIndices);
+        // exporter.save(Math::ArrayAlgorithms<complex<double>>::real(Array<complex<double>>(pairings_non_local)), DATA_DIR + "pairings_per_state_non_local_real_J_" + to_string(j[n]) + ".csv");
+        // exporter.save(Math::ArrayAlgorithms<complex<double>>::imag(Array<complex<double>>(pairings_non_local)), DATA_DIR + "pairings_per_state_non_local_imag_J_" + to_string(j[n]) + ".csv");
+
+        // double deltaAtImp = 0.;
+        // for(unsigned idx = 0; idx < eigenValues.getSize(); idx++){
             
-            if(eigenValues(idx) < 0.){
-                deltaAtImp += V_sc* real(pairings[idx]);
-            }
-        }
-        cout << "Delta at imp:" << deltaAtImp << endl;
+        //     if(eigenValues(idx) < 0.){
+        //         deltaAtImp += V_sc* real(pairings[idx]);
+        //     }
+        // }
+        // cout << "Delta at imp:" << deltaAtImp << endl;
         // Calculate the local density of states (LDOS).
         Index impuritySite = spatialImpurityIndex();
         TBTK::Index idx_ldos = {IDX_SUM_ALL, IDX_SUM_ALL, IDX_SUM_ALL};
@@ -808,7 +854,7 @@ void localization(){
     vector<complex<double>> mu_list = {0.0, 2., 3.618};
     Exporter exporter;
     exporter.setNumberSiginificantDigits(8);
-
+    const unsigned int MAX_SC_ITERATIONS = 100;
     for(auto mu : mu_list){
         DeltaCallback deltaCallback;
         initDelta();
@@ -834,6 +880,38 @@ void localization(){
             }
         }
         exporter.save(Array<double>(localization_vec), DATA_DIR + "localization_mu_" + to_string(real(mu)) + ".csv");
+
+
+        // Self consistent calculation for different mu
+        unsigned iteration = 0;
+        for(; iteration <= MAX_SC_ITERATIONS; iteration++){
+            if(selfConsistencyStep(solver)){
+                break;
+            }
+            solver->run();
+            cout << "Sc iteration nr: " << iteration << endl;
+            cout << Delta[{SIZE/2, SIZE/2}] << endl;
+        }
+        if(iteration >= MAX_SC_ITERATIONS){
+            cerr << "Maximum sc iterations reached" << endl;
+        }
+        vector<double> delta_vec;
+        for(unsigned x = 0; x < SIZE; x++){
+            for(unsigned y = 0; y < SIZE; y++){
+                delta_vec.push_back(real(Delta[{{x},{y}}]));
+            }
+        }
+        exporter.save(Array<double>(delta_vec), DATA_DIR + "delta_sc_mu_" + to_string(real(mu)) + ".csv");
+        Array<double> localization_sc = calculateLocalizationYSR(make_unique<PropertyExtractor::BlockDiagonalizer>(pe), radius);
+        vector<double> localization_sc_vec;
+        for(unsigned x = 0; x < 2*radius; x++){
+            for(unsigned y = 0; y < 2*radius; y++){
+                localization_sc_vec.push_back(localization[{{x},{y}}]);
+            }
+        }
+        exporter.save(Array<double>(localization_sc_vec), DATA_DIR + "localization_sc_mu_" + to_string(real(mu)) + ".csv");
+
+
     }
 
 
@@ -847,7 +925,7 @@ void selfConsistency(){
 
 
     //Number of iterations.
-    const unsigned int NUM_ITERATIONS = 30;
+    const unsigned int NUM_ITERATIONS = J_ITERATIONS;
     const unsigned int MAX_SC_ITERATIONS = 100;
     //Arrays where the results are stored after each iteration.
     Array<double> totalLdos({NUM_ITERATIONS, 500}, 0);
@@ -912,7 +990,9 @@ void selfConsistency(){
         exporter.save(Math::ArrayAlgorithms<complex<double>>::real(Array<complex<double>>(pairings)), DATA_DIR + "pairings_per_state_sc_real_J_" + to_string(j[n]) + ".csv");
         exporter.save(Math::ArrayAlgorithms<complex<double>>::imag(Array<complex<double>>(pairings)), DATA_DIR + "pairings_per_state_sc_imag_J_" + to_string(j[n]) + ".csv");
 
-
+        vector<complex<double>> pairings_nonlocal = calculatePairingPerState(make_unique<PropertyExtractor::BlockDiagonalizer>(propertyExtractor), energyIndices);
+        exporter.save(Math::ArrayAlgorithms<complex<double>>::real(Array<complex<double>>(pairings_nonlocal)), DATA_DIR + "pairings_per_state_non_local_sc_real_J_" + to_string(j[n]) + ".csv");
+        exporter.save(Math::ArrayAlgorithms<complex<double>>::imag(Array<complex<double>>(pairings_nonlocal)), DATA_DIR + "pairings_per_state_non_local_sc_imag_J_" + to_string(j[n]) + ".csv");
     }
     vector<complex<double>> mu_list = {0.0, 2., 3.618};
     for(auto mu : mu_list){
@@ -943,7 +1023,6 @@ void selfConsistency(){
             }
         }
         exporter.save(Array<double>(delta_vec), DATA_DIR + "delta_sc_mu_" + to_string(real(mu)) + ".csv");
-
     }
 
 }
@@ -952,9 +1031,9 @@ int main(){
     //Initialize TBTK.
     Initialize();
 
-    runDOScalcs();
-    energySpectrum();
-    localization();
+    // runDOScalcs();
+    // energySpectrum();
+    // localization();
     selfConsistency();
     return 0;
 }
