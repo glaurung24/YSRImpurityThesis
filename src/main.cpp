@@ -29,7 +29,7 @@ const unsigned int SIZE_X = SIZE;
 const unsigned int SIZE_Y = SIZE;
 const unsigned int SIZE_Z = SIZE;
 
-const unsigned int J_ITERATIONS = 150; //70;
+const unsigned int J_ITERATIONS = 200; //70;
 
 //Order parameter. 
 Array<complex<double>> Delta;
@@ -58,7 +58,7 @@ const int useOnlyOneBlock = 0; // Set to 1 for first block, 2 for second block, 
 
 // Calculation details
 
-const string DATA_DIR = "../../../../data_ultrares/"; //"../../../../data_highres/";
+const string DATA_DIR = "../../../../data_ultrares2/"; //"../../../../data_highres/";
 const string FIG_DIR = "../../../../figures2/";
 
 // This function is supposed to divide the Hamiltonian into two blocks with the first block being particle spin up and hole spin down.
@@ -383,12 +383,15 @@ void runDOScalcs(){
     JCallback jCallback;
     vector<double> U_list = {0.0, 0.75, -0.75};
     vector<double> J_list = {1.0, 1.0, 1.0};
+    vector<double> mu_list = {0.0, 0.75, -0.75};
 
     Plotter plotter;
-    for(unsigned idx = 0; idx < U_list.size(); idx++){
+    // for(unsigned idx = 0; idx < U_list.size(); idx++){
+    for(unsigned idx = 0; idx < mu_list.size(); idx++){
         DeltaCallback deltaCallback;
         initDelta();
-        Model model = generateModel(mu, DELTA, U_list[idx], jCallback, deltaCallback);
+        // Model model = generateModel(mu, DELTA, U_list[idx], jCallback, deltaCallback);
+        Model model = generateModel(mu_list[idx], DELTA, 0.0, jCallback, deltaCallback);
         //Update the callback with the current value of J.
         jCallback.setJ(J_list[idx]);
         //Set up the Solver.
@@ -428,9 +431,12 @@ void runDOScalcs(){
 
         Exporter exporter;
         exporter.setNumberSiginificantDigits(8);
-        exporter.save(ldos_export, DATA_DIR + "ldos_particle_atImp_U_" + to_string(U_list[idx]) + ".csv");
-        exporter.save(energies, DATA_DIR + "ldos_particle_atImp_energies_U_" + to_string(U_list[idx]) + ".csv");
-        exporter.save(dos, DATA_DIR + "dos_U_" + to_string(U_list[idx]) + ".csv");
+        // exporter.save(ldos_export, DATA_DIR + "ldos_particle_atImp_U_" + to_string(U_list[idx]) + ".csv");
+        // exporter.save(energies, DATA_DIR + "ldos_particle_atImp_energies_U_" + to_string(U_list[idx]) + ".csv");
+        // exporter.save(dos, DATA_DIR + "dos_U_" + to_string(U_list[idx]) + ".csv");
+        exporter.save(ldos_export, DATA_DIR + "ldos_particle_atImp_mu_" + to_string(mu_list[idx]) + ".csv");
+        exporter.save(energies, DATA_DIR + "ldos_particle_atImp_energies_mu_" + to_string(mu_list[idx]) + ".csv");
+        exporter.save(dos, DATA_DIR + "dos_mu_" + to_string(mu_list[idx]) + ".csv");
 
         //Smooth the LDOS.
         const double SMOOTHING_SIGMA = 0.01;
@@ -916,7 +922,7 @@ void localization(){
 
 
 }
-
+#include <fstream>
 void selfConsistency(){
     JCallback jCallback;
     DeltaCallback deltaCallback;
@@ -935,9 +941,11 @@ void selfConsistency(){
         (unsigned int)model.getBasisSize()
     });
     //Iterate over 100 values for J.
-    Range j(0, 5, NUM_ITERATIONS);
+    Range j(0, 3, NUM_ITERATIONS);
 
     Array<double> j_values(j);
+    vector<string> j_values_list_str(NUM_ITERATIONS);
+    ofstream j_list_file(DATA_DIR + "j_files_sc_list.txt");
     Exporter exporter;
     exporter.setNumberSiginificantDigits(8);
 
@@ -990,10 +998,12 @@ void selfConsistency(){
         exporter.save(Math::ArrayAlgorithms<complex<double>>::real(Array<complex<double>>(pairings)), DATA_DIR + "pairings_per_state_sc_real_J_" + to_string(j[n]) + ".csv");
         exporter.save(Math::ArrayAlgorithms<complex<double>>::imag(Array<complex<double>>(pairings)), DATA_DIR + "pairings_per_state_sc_imag_J_" + to_string(j[n]) + ".csv");
 
-        vector<complex<double>> pairings_nonlocal = calculatePairingPerState(make_unique<PropertyExtractor::BlockDiagonalizer>(propertyExtractor), energyIndices);
-        exporter.save(Math::ArrayAlgorithms<complex<double>>::real(Array<complex<double>>(pairings_nonlocal)), DATA_DIR + "pairings_per_state_non_local_sc_real_J_" + to_string(j[n]) + ".csv");
-        exporter.save(Math::ArrayAlgorithms<complex<double>>::imag(Array<complex<double>>(pairings_nonlocal)), DATA_DIR + "pairings_per_state_non_local_sc_imag_J_" + to_string(j[n]) + ".csv");
+        j_list_file << "pairings_per_state_sc_imag_J_" + to_string(j[n]) + ".csv" << endl << flush;
+        // vector<complex<double>> pairings_nonlocal = calculatePairingPerState(make_unique<PropertyExtractor::BlockDiagonalizer>(propertyExtractor), energyIndices);
+        // exporter.save(Math::ArrayAlgorithms<complex<double>>::real(Array<complex<double>>(pairings_nonlocal)), DATA_DIR + "pairings_per_state_non_local_sc_real_J_" + to_string(j[n]) + ".csv");
+        // exporter.save(Math::ArrayAlgorithms<complex<double>>::imag(Array<complex<double>>(pairings_nonlocal)), DATA_DIR + "pairings_per_state_non_local_sc_imag_J_" + to_string(j[n]) + ".csv");
     }
+    j_list_file.close();
     vector<complex<double>> mu_list = {0.0, 2., 3.618};
     for(auto mu : mu_list){
         DeltaCallback deltaCallback;
@@ -1031,9 +1041,9 @@ int main(){
     //Initialize TBTK.
     Initialize();
 
-    // runDOScalcs();
+    runDOScalcs();
     // energySpectrum();
     // localization();
-    selfConsistency();
+    // selfConsistency();
     return 0;
 }

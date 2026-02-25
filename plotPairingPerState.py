@@ -15,6 +15,95 @@ from matplotlib.cm import ScalarMappable
 #     'font.serif': ['STIXGeneral', 'Nimbus Roman', 'Nimbus Roman No9 L', 'Times', 'DejaVu Serif'],
 #     'mathtext.fontset': 'stix',  # matches Times aesthetics for math
 # })
+
+
+def scatter_spectrum(
+    x, Ys, Ws,
+    ax=None,
+    cmap="seismic",
+    norm=None,
+    markersize=12,
+    alpha=0.9,
+    vmin=None, vmax=None,
+    center=0.0,
+    colorbar=False,
+    cbar_label="",
+    **scatter_kw
+):
+    """
+    Plot a collection of energy curves as colored scatter points.
+
+    Parameters
+    ----------
+    x : 1D array (N,)
+        The parameter (e.g. lambda)
+    Ys : list of 1D arrays
+        Each y-array is one energy branch of shape (N,)
+    Ws : list of 1D arrays
+        Each weight array (wavefunction weight) of shape (N,)
+    ax : Matplotlib Axes
+    cmap : str
+        Diverging colormap (negative→blue, positive→red)
+    markersize : float
+    alpha : float
+    vmin, vmax : float
+        Optional color scale limits. If None, symmetric from global |Ws|.
+    center : float
+        Center value for diverging colormap (usually 0)
+    colorbar : bool
+        Whether to draw a colorbar
+    cbar_label : str
+        Label for the colorbar
+    scatter_kw : other keyword arguments passed to ax.scatter
+
+    Returns
+    -------
+    ax : Matplotlib Axes
+    norm : Normalize
+        Color normalization object
+    """
+    if ax is None:
+        ax = plt.gca()
+
+    # Convert Ys and Ws to lists
+    Ys = list(Ys)
+    Ws = list(Ws)
+
+    # Determine global color range
+    if vmin is None or vmax is None:
+        all_w = np.concatenate([np.asarray(w) for w in Ws])
+        a = np.nanmax(np.abs(all_w)) if all_w.size else 1.0
+        vmin, vmax = -a, +a
+
+    if not norm:
+        # Diverging normalization: negative→blue, positive→red, zero→white
+        norm = TwoSlopeNorm(vmin=vmin, vcenter=center, vmax=vmax)
+
+    # Draw each branch as a scatter
+    for y, w in zip(Ys, Ws):
+        ax.scatter(
+            x, y,
+            c=w,
+            cmap=cmap,
+            norm=norm,
+            s=markersize,
+            alpha=alpha,
+            linewidths=0,
+            **scatter_kw
+        )
+
+    # Optional colorbar
+    if colorbar:
+        sm = ScalarMappable(norm=norm, cmap=cmap)
+        sm.set_array([])
+        cbar = plt.colorbar(sm, ax=ax)
+        cbar.set_label(cbar_label)
+
+    return ax, norm
+
+
+
+
 def align_ylabels(ax_list, x=-0.12, pad=10, use_constrained=True):
     """Align y-labels across axes and optionally use constrained_layout."""
     fig = ax_list[0].figure
@@ -281,11 +370,13 @@ def compute_edges(x):
 
 
 
-data_dir = "data_ultrares/"
+data_dir = "data_ultrares2/"
 figure_dir = "figures/"
 # plotTargetFiles = "pairings_per_state_non_local_real_J_"
 lower_threshold_pairing = 1e-5
 delta = 0.3
+plotLine = False
+
 
 sc = True
 if sc:
@@ -303,9 +394,9 @@ else:
 
 significant_digits = 6
 
-plotsize = 2.9
+plotsize = 2.75
 
-xlim = [0,4.5]
+xlim = [0,3]
 ylim = [-1.3, 1.3]
 
 j_values = np.loadtxt(data_dir + j_file)
@@ -322,9 +413,11 @@ YSR_pairing= [[], []]
 eigenvalues_all = []
 pairings_all = []
 
+j_values = np.loadtxt(data_dir + "j_files_sc_list.txt")
 
 for j in j_values:
     try:
+        j = float(j)
         eigenvalues = np.loadtxt(data_dir + energies_file + "{0:.6f}.csv".format(round(j,significant_digits)))
         delta_vec = np.loadtxt(data_dir + delta_file + "{0:.6f}.csv".format(round(j,significant_digits)))
         size = int(np.sqrt(len(delta_vec)))
@@ -433,6 +526,7 @@ for n in range(len(YSR_energy)):
     # lc, _ = colored_line(lam, YSR_energy[n], YSR_pairing[n], ax=ax_bottom, cmap=cmap, linewidth=linewidth,
     #                      vmin=-a, vmax=+a, norm=norm)
 
+
 ax.set_rasterization_zorder(zorder_lines+1)
 
 
@@ -510,14 +604,27 @@ if(plotPairingSmoothed):
     cbar_bottom = fig.colorbar(sm_bottom, ax=ax_bottom, pad=0.02)
     cbar_bottom.set_label(cbar_label_bottom)
 else:
-    for n in range(E.shape[0]):
-    # Reuse the same norm so the color meaning is consistent
-        lc, _ = colored_line(lam, E[n], S[n], ax=ax_bottom, cmap=cmap, linewidth=linewidth_non_ysr,
-                            vmin=-a, vmax=+a, norm=norm, zorder=zorder_lines)
-
-    for n in range(len(YSR_energy)):
+    if(plotLine):
+        for n in range(E.shape[0]):
         # Reuse the same norm so the color meaning is consistent
-        lc, _ = colored_line(lam, YSR_energy[n], YSR_pairing[n], ax=ax_bottom, cmap=cmap, linewidth=linewidth_ysr,
+            lc, _ = colored_line(lam, E[n], S[n], ax=ax_bottom, cmap=cmap, linewidth=linewidth_non_ysr,
+                                vmin=-a, vmax=+a, norm=norm, zorder=zorder_lines)
+
+        for n in range(len(YSR_energy)):
+            # Reuse the same norm so the color meaning is consistent
+            lc, _ = colored_line(lam, YSR_energy[n], YSR_pairing[n], ax=ax_bottom, cmap=cmap, linewidth=linewidth_ysr,
+                                vmin=-a, vmax=+a, norm=norm, zorder=zorder_lines)
+    else:
+        # for n in range(E.shape[0]):
+        # # Reuse the same norm so the color meaning is consistent
+        #     scatter_spectrum(lam, E[n], S[n], ax=ax_bottom, cmap=cmap, markersize=linewidth_non_ysr,
+        #                         vmin=-a, vmax=+a, norm=norm, zorder=zorder_lines)
+        scatter_spectrum(lam, E, S, ax=ax_bottom, cmap=cmap, markersize=linewidth_non_ysr,
+                    vmin=-a, vmax=+a, norm=norm, zorder=zorder_lines, alpha=0.8)
+        # for n in range(len(YSR_energy)):
+        #     scatter_spectrum(lam, YSR_energy[n], YSR_pairing[n], ax=ax_bottom, cmap=cmap, markersize=linewidth_ysr,
+        #                         vmin=-a, vmax=+a, norm=norm, zorder=zorder_lines)
+        scatter_spectrum(lam, YSR_energy, YSR_pairing, ax=ax_bottom, cmap=cmap, markersize=linewidth_ysr,
                             vmin=-a, vmax=+a, norm=norm, zorder=zorder_lines)
 
     ax_bottom.set_rasterization_zorder(zorder_lines+1)
@@ -550,9 +657,9 @@ if len(ticks) > 0:
 
 ax.set_xlabel(r'$J$')
 ax.set_ylabel(r'$E\,/\,\Delta$')
-ax_top.set_ylabel(r'$\Delta( \mathbf{x}_0)\,/\,\Delta$')
+ax_top.set_ylabel(r'$\Delta_{\mathbf{x}_0}\,/\,\Delta$')
 ax_bottom.set_xlabel(r'$J$')
-ax_bottom.set_ylabel(r'$\epsilon\,/\,\Delta$')
+ax_bottom.set_ylabel(r'$E\,/\,\Delta$')
 # ax.set_title('Energy Spectrum (multiple branches) with S(λ) as color')
 
 
@@ -582,8 +689,11 @@ ax_bottom.axvline(x=qpt, linewidth=linewidth_jc, color='k')
 ticks = list(ax_bottom.get_xticks())
 labels = [str(lbl) for lbl in ticks]
 
+del ticks[3]
+del labels[3]
+
 # Add your custom tick
-ticks.append(qpt[0])                    # numeric x‑coordinate for the tick
+ticks.append(qpt[0])              # numeric x‑coordinate for the tick
 labels.append(r'$J_C$')            # the string label
 
 print(ticks)
@@ -597,11 +707,11 @@ align_ylabels([ax_top, ax_bottom], use_constrained=False)
 # ax_top.grid(True, alpha=0.3)
 
 # fig2.tight_layout()
-fig2.savefig(figure_dir + "pairing_delta.pdf", dpi=400, bbox_inches="tight")   # vector
-fig2.savefig(figure_dir + "pairing_delta.png", dpi=400, bbox_inches="tight")  # raster
-fig2.savefig(figure_dir + "pairing_delta.pgf", dpi=400, bbox_inches="tight")   # vector
+fig2.savefig(figure_dir + "pairing_delta.pdf", dpi=600, bbox_inches="tight")   # vector
+fig2.savefig(figure_dir + "pairing_delta.png", dpi=600, bbox_inches="tight")  # raster
+fig2.savefig(figure_dir + "pairing_delta.pgf", dpi=600, bbox_inches="tight")   # vector
 
 fig.tight_layout()
-fig.savefig(figure_dir + "pairing.pdf", dpi=300, bbox_inches="tight")   # vector
-fig.savefig(figure_dir + "pairing.pgf", dpi=300, bbox_inches="tight")   # vector
-fig.savefig(figure_dir + "pairing.png", dpi=300, bbox_inches="tight")  # raster
+fig.savefig(figure_dir + "pairing.pdf", dpi=600, bbox_inches="tight")   # vector
+fig.savefig(figure_dir + "pairing.pgf", dpi=600, bbox_inches="tight")   # vector
+fig.savefig(figure_dir + "pairing.png", dpi=600, bbox_inches="tight")  # raster
