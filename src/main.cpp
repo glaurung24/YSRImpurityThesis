@@ -1,3 +1,4 @@
+#include "TBTK/UnitHandler.h"
 #include "TBTK/Property/DOS.h"
 #include "TBTK/PropertyExtractor/Diagonalizer.h"
 #include "TBTK/PropertyExtractor/PropertyExtractor.h"
@@ -17,10 +18,12 @@
 #include <memory>
 #include "TBTK/Exporter.h"
 #include "TBTK/Math/ArrayAlgorithms.h"
+
 using namespace std;
 using namespace TBTK;
 using namespace Visualization::MatPlotLib;
-complex<double> i(0, 1);
+
+const complex<double> i(0, 1);
 
 
 //Lattice size
@@ -29,7 +32,7 @@ const unsigned int SIZE_X = SIZE;
 const unsigned int SIZE_Y = SIZE;
 const unsigned int SIZE_Z = SIZE;
 
-const unsigned int J_ITERATIONS = 200; //70;
+const unsigned int J_ITERATIONS = 50;//200; //70;
 
 //Order parameter. 
 Array<complex<double>> Delta;
@@ -43,7 +46,7 @@ const double J = 1.0;//1.00; // Zeeman field strength
 const double U = 0.0; //Local non magnetic scattering
 const int MAX_ITERATIONS = 50;
 const double CONVERGENCE_LIMIT = 0.000001;
-const double DELTA = 0.3; // Non self consistent delta
+double DELTA = 0.3; // Non self consistent delta
 const complex<double> DELTA_INITIAL_GUESS = 0.3 + 0.0*i;
 const double DELTA_INITIAL_GUESS_RANDOM_WINDOW = 0.0;
 const bool PERIODIC_BC_X = true;
@@ -58,7 +61,7 @@ const int useOnlyOneBlock = 0; // Set to 1 for first block, 2 for second block, 
 
 // Calculation details
 
-const string DATA_DIR = "../../../../data_ultrares2/"; //"../../../../data_highres/";
+const string DATA_DIR = "../../../../data_noJ/"; //"../../../../data_highres/";
 const string FIG_DIR = "../../../../figures2/";
 
 // This function is supposed to divide the Hamiltonian into two blocks with the first block being particle spin up and hole spin down.
@@ -457,6 +460,95 @@ void runDOScalcs(){
     //     {0, {-5, 5}},
     //     {1, {0, 100}},
     // });
+    plotter.setTitle("LDOS at impurity");
+    plotter.setLabelX("Energy");
+    plotter.setLabelY("LDOS");
+    // plotter.setBoundsY(-5, 5);
+    plotter.save(FIG_DIR + "ldos_atImp.png");
+    //Plot the eigenvalues.
+    plotter.clear();
+}
+
+void runDOScalcsNoJ(){
+    //as input to the Model.
+    JCallback jCallback;
+    // vector<double> U_list = {0.0, 0.75, -0.75};
+    // vector<double> J_list = {1.0, 1.0, 1.0};
+    // vector<double> mu_list = {0.0, 0.75, -0.75};
+
+    Plotter plotter;
+    // for(unsigned idx = 0; idx < U_list.size(); idx++){
+    vector<double> delta_list = {0.3, 0.0};
+    for(unsigned idx = 0; idx < delta_list.size(); idx++){
+        DELTA = delta_list[idx];
+        DeltaCallback deltaCallback;
+        initDelta();
+        // Model model = generateModel(mu, DELTA, U_list[idx], jCallback, deltaCallback);
+        Model model = generateModel(0.0, DELTA, 0.0, jCallback, deltaCallback);
+        //Update the callback with the current value of J.
+        jCallback.setJ(0.0);
+        //Set up the Solver.
+        unique_ptr<Solver::BlockDiagonalizer> solver = solveModel(model);
+
+        //Set up the PropertyExtractor.
+        unsigned resolution = 500;
+        PropertyExtractor::BlockDiagonalizer pe(*solver);
+        pe.setEnergyWindow(
+            -1.5,
+            1.5,
+            resolution
+        );
+
+        Index impuritySite = spatialImpurityIndex();
+        TBTK::Index idx_ldos = {IDX_SUM_ALL, IDX_SUM_ALL, 0};
+        for (unsigned index = 0; index < impuritySite.getSize(); ++index){
+            idx_ldos.pushBack(impuritySite.at(index));
+        }
+    
+        Property::LDOS ldos = pe.calculateLDOS(
+            {idx_ldos}
+        );
+        Property::DOS dos = pe.calculateDOS();
+
+        Array<double> ldos_export({resolution},0);
+        Array<double> energies({resolution},0);
+        // Store the LDOS in totalLdos.
+        for(unsigned int e = 0; e < ldos.getResolution(); e++){
+            ldos_export[{e}] = ldos(
+                idx_ldos,
+                e
+            );
+            energies[{e}] = ldos.getEnergy(e);
+        }
+
+
+        Exporter exporter;
+        exporter.setNumberSiginificantDigits(8);
+        // exporter.save(ldos_export, DATA_DIR + "ldos_particle_atImp_U_" + to_string(U_list[idx]) + ".csv");
+        // exporter.save(energies, DATA_DIR + "ldos_particle_atImp_energies_U_" + to_string(U_list[idx]) + ".csv");
+        // exporter.save(dos, DATA_DIR + "dos_U_" + to_string(U_list[idx]) + ".csv");
+        // exporter.save(ldos_export, DATA_DIR + "ldos__mu_" + to_string(mu_list[idx]) + ".csv");
+        exporter.save(energies, DATA_DIR + "dos_noJ_energies_delta_" + to_string(delta_list[idx]) + ".csv");
+        exporter.save(dos, DATA_DIR + "dos_noJ_delta_" + to_string(delta_list[idx]) + ".csv");
+
+        //Smooth the LDOS.
+        const double SMOOTHING_SIGMA = 0.01;
+        const unsigned int SMOOTHING_WINDOW = 31;
+        dos = Smooth::gaussian(
+            dos,
+            SMOOTHING_SIGMA,
+            SMOOTHING_WINDOW
+        );
+    
+        plotter.plot(
+            dos
+        );
+    }
+
+    plotter.setAxes({
+        {0, {-5, 5}},
+        {1, {0, 100}},
+    });
     plotter.setTitle("LDOS at impurity");
     plotter.setLabelX("Energy");
     plotter.setLabelY("LDOS");
@@ -1037,13 +1129,90 @@ void selfConsistency(){
 
 }
 
+void selfConsistencyTemperature(){
+    JCallback jCallback;
+    jCallback.setJ(0.0);
+    DeltaCallback deltaCallback;
+    initDelta();
+    Model model = generateModel(mu, DELTA, U, jCallback, deltaCallback);
+
+
+    //Number of iterations.
+    const unsigned int NUM_ITERATIONS = J_ITERATIONS;
+    const unsigned int MAX_SC_ITERATIONS = 200;
+    //Arrays where the results are stored after each iteration.
+    Array<double> totalLdos({NUM_ITERATIONS, 500}, 0);
+    Array<double> totalLdosSmooth({NUM_ITERATIONS, 500}, 0);
+    Array<double> totalEigenValues({
+        NUM_ITERATIONS,
+        (unsigned int)model.getBasisSize()
+    });
+    //Iterate over 100 values for J.
+    Range temperature(0, 0.25, NUM_ITERATIONS);
+
+    vector<string> temp_values_list_str(NUM_ITERATIONS);
+    ofstream temp_list_file(DATA_DIR + "temp_files_sc_list.txt");
+    Exporter exporter;
+    exporter.setNumberSiginificantDigits(8);
+    Array<double> temp_values(temperature);
+    exporter.save(temp_values, DATA_DIR + "temperatures_sc.csv");
+    for(unsigned int n = 0; n < NUM_ITERATIONS; n++){
+        //Set up the Solver.
+        model.setTemperature(temperature[n]);
+        unique_ptr<Solver::BlockDiagonalizer> solver = solveModel(model);
+        //Set up the PropertyExtractor.
+        unsigned iteration = 0;
+        for(; iteration <= MAX_SC_ITERATIONS; iteration++){
+            if(selfConsistencyStep(solver)){
+                break;
+            }
+            solver->run();
+            cout << "Sc iteration nr: " << iteration << endl;
+            cout << Delta[{SIZE/2, SIZE/2}] << endl;
+        }
+        if(iteration >= MAX_SC_ITERATIONS){
+            cerr << "Maximum sc iterations reached" << endl;
+        }
+
+
+
+        PropertyExtractor::BlockDiagonalizer propertyExtractor(*solver);
+
+		std::cout << "Temp: " << temperature[n] << std::endl;
+
+
+        vector<double> delta_vec;
+        for(unsigned x = 0; x < SIZE; x++){
+            for(unsigned y = 0; y < SIZE; y++){
+                delta_vec.push_back(real(Delta[{{x},{y}}]));
+            }
+        }
+        exporter.save(Array<double>(delta_vec), DATA_DIR + "delta_sc_temp_" + to_string(temperature[n]) + ".csv");
+
+        temp_list_file << "delta_sc_temp_" + to_string(temperature[n]) + ".csv" << endl << flush;
+    }
+    temp_list_file.close();
+}
+
+
+
 int main(){
     //Initialize TBTK.
     Initialize();
+    UnitHandler::setScales(
+    {"1 rad", "1 C", "1 pcs", "1 eV", "0.3048 m", "11604.5181215 K", "1 s"});
+	if ((UnitHandler::getConstantInNaturalUnits("k_B") - 1.) > 1E-16)
+	{
+		Streams::err << UnitHandler::getConstantInNaturalUnits("k_B") << endl;
+		Streams::err << "Warning k_B set to wrong dimension" << endl;
+		return -1;
+	}
 
-    runDOScalcs();
+    // runDOScalcs();
+    // runDOScalcsNoJ();
     // energySpectrum();
     // localization();
     // selfConsistency();
+    selfConsistencyTemperature();
     return 0;
 }
